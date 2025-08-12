@@ -1,4 +1,3 @@
-// backend/config/emailConfig.js
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 
@@ -13,7 +12,7 @@ console.log('📧 Email config:', {
 const createTransporter = () => {
   try {
     // Check if nodemailer is properly loaded
-    if (!nodemailer || typeof nodemailer.createTransporter !== 'function') {
+    if (!nodemailer || typeof nodemailer.createTransport !== 'function') {
       throw new Error('Nodemailer not properly loaded');
     }
 
@@ -24,7 +23,8 @@ const createTransporter = () => {
       return null;
     }
 
-    const transporter = nodemailer.createTransporter({
+    // Fix the method name from createTransporter to createTransport
+    const transporter = nodemailer.createTransport({
       service: process.env.EMAIL_SERVICE || 'gmail',
       auth: {
         user: process.env.EMAIL_USER,

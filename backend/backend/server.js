@@ -1,41 +1,45 @@
-require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const emailRoutes = require('./routes/emailRoutes');
-
+const { sendEmail } = require('./config/emailConfig');
 const app = express();
 
-// Middleware
-app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+// Middleware to parse JSON
+app.use(express.json());
 
-// Routes
-app.use('/api/email', emailRoutes);
+// Test route for sending email
+app.get('/send-test-email', async (req, res) => {
+  try {
+    const emailOptions = {
+      to: 'jayden.hivetechsol@gmail.com',  // Replace with the recipient email
+      subject: 'Test Email from Localhost',
+      text: 'This is a test email sent from your local server.',
+      html: '<p>This is a test email sent from your local server.</p>',
+    };
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    message: 'Server is running',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Error:', err.stack);
-  res.status(500).json({
-    success: false,
-    message: 'Internal server error',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
-  });
+    const result = await sendEmail(emailOptions);
+    res.json({
+      success: true,
+      message: 'Test email sent successfully!',
+      info: result
+    });
+  } catch (error) {
+    console.error('Error sending email:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to send test email.',
+      error: error.message
+    });
+  }
 });
 
 const PORT = process.env.PORT || 5000;
-
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`📧 Email service: ${process.env.EMAIL_SERVICE || 'Not configured'}`);
 });
+const cors = require('cors');
+
+// Allow requests from your frontend
+app.use(cors({
+  origin: 'http://localhost:9002',  // Frontend URL
+  methods: ['GET', 'POST'],        // Allowed methods
+  allowedHeaders: ['Content-Type'] // Allowed headers
+}));
