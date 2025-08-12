@@ -102,7 +102,6 @@ export async function cleanContacts(ids: string[]) {
     return { success: true, message: `Cleaned ${updatedCount} contacts.` };
 }
 
-
 function createAntiSpamSubject(subject: string, firstName: string) {
   let antiSpam = subject;
   const spamWords: { [key: string]: string } = {
@@ -128,41 +127,189 @@ function personalizeContent(content: string, contact: Omit<Contact, 'id'>) {
     .replace(/\{\{date\}\}/g, new Date().toLocaleDateString());
 }
 
-export async function sendCampaign() {
-  console.log('Starting campaign...');
-  await delay(1000);
-  let emailsSent = 0;
+// Enhanced function to send email via backend
+async function sendEmailViaBackend(contact: Contact, subject: string, htmlContent: string) {
+  console.log(`🚀 Sending email to: ${contact.email}`);
   
-  for (const contact of db.contacts) {
-    if (contact.status === 'Pending') {
-      try {
-        const personalizedSubject = personalizeContent(db.campaign.subject, contact);
-        const finalSubject = createAntiSpamSubject(personalizedSubject, contact.firstName);
-        
-        const personalizedBody = personalizeContent(db.campaign.body, contact);
-        
-        // This is where you would integrate with an email sending service like SendGrid, Resend, etc.
-        // For this demo, we simulate a successful send.
-        console.log(`Simulating email send to ${contact.email}`);
-        console.log(`Subject: ${finalSubject}`);
-        
-        // This simulates the logic that would be inside an email template
-        const trackingPixel = `<img src="${process.env.NEXT_PUBLIC_BASE_URL}/api/track/${contact.id}" width="1" height="1" alt="" style="display:none;" />`;
-        const emailHtml = `<div>${personalizedBody.replace(/\n/g, '<br>')}</div>${trackingPixel}`;
-        console.log('Email HTML includes tracking pixel.');
+  try {
+    const response = await fetch('http://localhost:5000/api/send-contact', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: `${contact.firstName} ${contact.lastName}`.trim(),
+        email: contact.email,
+        subject: subject,
+        message: htmlContent.replace(/<[^>]*>/g, ''), // Strip HTML for text version
+        htmlContent: htmlContent // Send full HTML
+      }),
+    });
 
-        contact.status = 'Sent';
-        contact.sentTimestamp = new Date().toISOString();
-        emailsSent++;
-        await delay(100); // Simulate delay between sends
-      } catch (e) {
-        contact.status = 'Error';
-        console.error(`Failed to send to ${contact.email}:`, e);
-      }
+    console.log(`📡 Response status: ${response.status}`);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+      console.error(`❌ Backend error:`, errorData);
+      throw new Error(`Backend error: ${errorData.message || `HTTP ${response.status}`}`);
+    }
+
+    const result = await response.json();
+    console.log(`✅ Email sent successfully:`, result);
+    return result.success;
+
+  } catch (error) {
+    console.error('❌ Network or parsing error:', error);
+    throw error;
+  }
+}
+
+export async function sendCampaign() {
+  console.log('🚀 Starting real email campaign...');
+  await delay(1000);
+  
+  let emailsSent = 0;
+  let emailsFailed = 0;
+  const errors: string[] = [];
+  
+  const pendingContacts = db.contacts.filter(contact => contact.status === 'Pending');
+  
+  if (pendingContacts.length === 0) {
+    return { success: false, message: "No pending contacts to send to!" };
+  }
+
+  console.log(`📧 Found ${pendingContacts.length} contacts to email`);
+  
+  // Test backend connection first
+  try {
+    const healthCheck = await fetch('http://localhost:5000/api/health');
+    if (!healthCheck.ok) {
+      throw new Error('Backend server not responding');
+    }
+    const health = await healthCheck.json();
+    console.log('🏥 Backend health check:', health);
+    
+    if (health.emailService !== 'loaded') {
+      throw new Error('Email service not properly loaded on backend');
+    }
+  } catch (error) {
+    console.error('❌ Backend connection failed:', error);
+    return { 
+      success: false, 
+      message: "Cannot connect to email backend. Please make sure the backend server is running on port 5000.",
+      error: error.message
+    };
+  }
+  
+  for (const contact of pendingContacts) {
+    try {
+      console.log(`\n📤 Processing: ${contact.email}`);
+      
+      const personalizedSubject = personalizeContent(db.campaign.subject, contact);
+      const finalSubject = createAntiSpamSubject(personalizedSubject, contact.firstName);
+      const personalizedBody = personalizeContent(db.campaign.body, contact);
+      
+      // Create tracking pixel
+      const trackingPixel = `<img src="${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:9002'}/api/track/${contact.id}" width="1" height="1" alt="" style="display:none;" />`;
+      
+      // Create proper HTML email
+      const emailHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>${finalSubject}</title>
+          <style>
+            body { 
+              font-family: Arial, sans-serif; 
+              line-height: 1.6; 
+              color: #333; 
+              max-width: 600px; 
+              margin: 0 auto; 
+              padding: 20px; 
+            }
+            .header { 
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+              color: white; 
+              padding: 30px; 
+              text-align: center; 
+              border-radius: 10px 10px 0 0; 
+            }
+            .content { 
+              background: #fff; 
+              padding: 30px; 
+              border: 1px solid #ddd; 
+              border-top: none; 
+            }
+            .footer { 
+              background: #f8f9fa; 
+              padding: 20px; 
+              text-align: center; 
+              font-size: 12px; 
+              color: #666; 
+              border-radius: 0 0 10px 10px; 
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>Message from ${db.campaign.senderName}</h1>
+          </div>
+          <div class="content">
+            ${personalizedBody.replace(/\n/g, '<br>')}
+          </div>
+          <div class="footer">
+            <p>Sent by ${db.campaign.senderName} | ${new Date().toLocaleDateString()}</p>
+            <p>This email was sent to ${contact.email}</p>
+          </div>
+          ${trackingPixel}
+        </body>
+        </html>
+      `;
+
+      // Send email via backend
+      await sendEmailViaBackend(contact, finalSubject, emailHtml);
+      
+      // Update contact status to sent
+      contact.status = 'Sent';
+      contact.sentTimestamp = new Date().toISOString();
+      emailsSent++;
+      
+      console.log(`✅ Email sent successfully to: ${contact.email}`);
+      
+      // Add delay between emails to avoid overwhelming the server
+      await delay(500);
+      
+    } catch (error) {
+      console.error(`❌ Failed to send email to ${contact.email}:`, error);
+      contact.status = 'Error';
+      emailsFailed++;
+      errors.push(`${contact.email}: ${error.message}`);
     }
   }
 
   revalidatePath('/');
-  console.log(`Campaign finished. ${emailsSent} emails sent.`);
-  return { success: true, message: `Campaign sent successfully to ${emailsSent} recipients!` };
+  
+  const resultMessage = emailsFailed > 0 
+    ? `Campaign completed! ${emailsSent} emails sent successfully, ${emailsFailed} failed.`
+    : `Campaign sent successfully to ${emailsSent} recipients! 🎉`;
+    
+  console.log(`📊 Campaign finished: ${emailsSent} sent, ${emailsFailed} failed`);
+  
+  if (errors.length > 0) {
+    console.log('❌ Errors encountered:');
+    errors.forEach(error => console.log(`   - ${error}`));
+  }
+  
+  return { 
+    success: emailsSent > 0, 
+    message: resultMessage,
+    stats: {
+      sent: emailsSent,
+      failed: emailsFailed,
+      total: pendingContacts.length
+    },
+    errors: errors
+  };
 }

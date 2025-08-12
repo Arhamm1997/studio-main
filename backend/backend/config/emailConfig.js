@@ -1,52 +1,74 @@
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 
-// Debug logging
-console.log('📦 Nodemailer loaded:', typeof nodemailer);
-console.log('📧 Email config:', {
-  user: process.env.EMAIL_USER ? '✓ Set' : '✗ Not set',
-  pass: process.env.EMAIL_PASS ? '✓ Set' : '✗ Not set',
-  service: process.env.EMAIL_SERVICE || 'gmail'
-});
+console.log('\n📦 === EMAIL CONFIG LOADING ===');
+
+// Debug environment variables
+console.log('🔍 Environment Check:');
+console.log('SMTP_HOST:', process.env.SMTP_HOST || '❌ NOT SET');
+console.log('SMTP_PORT:', process.env.SMTP_PORT || '❌ NOT SET');
+console.log('SMTP_USER:', process.env.SMTP_USER || '❌ NOT SET');
+console.log('SMTP_PASSWORD:', process.env.SMTP_PASSWORD ? '✅ SET' : '❌ NOT SET');
+console.log('SMTP_FROM_EMAIL:', process.env.SMTP_FROM_EMAIL || '❌ NOT SET');
 
 const createTransporter = () => {
   try {
-    // Check if nodemailer is properly loaded
-    if (!nodemailer || typeof nodemailer.createTransport !== 'function') {
-      throw new Error('Nodemailer not properly loaded');
+    console.log('\n🚀 Creating email transporter...');
+
+    // Check if nodemailer is available
+    if (!nodemailer) {
+      throw new Error('Nodemailer not available');
     }
 
     // Check if email credentials are set
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      console.warn('⚠️ Email credentials not set in environment variables');
-      console.log('Please set EMAIL_USER and EMAIL_PASS in your .env file');
-      return null;
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
+      throw new Error('SMTP credentials not set. Please check SMTP_USER and SMTP_PASSWORD in .env file');
     }
 
-    // Fix the method name from createTransporter to createTransport
-    const transporter = nodemailer.createTransport({
-      service: process.env.EMAIL_SERVICE || 'gmail',
+    const transporterConfig = {
+      service: 'gmail',
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.SMTP_PORT) || 465,
+      secure: true, // true for 465, false for other ports
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASSWORD
       },
       tls: {
-        rejectUnauthorized: false // Only for development
+        rejectUnauthorized: false
       }
+    };
+
+    console.log('📋 Transporter config:', {
+      service: transporterConfig.service,
+      host: transporterConfig.host,
+      port: transporterConfig.port,
+      secure: transporterConfig.secure,
+      user: transporterConfig.auth.user,
+      passLength: transporterConfig.auth.pass ? transporterConfig.auth.pass.length : 0
     });
 
-    // Verify the transporter configuration
+    const transporter = nodemailer.createTransporter(transporterConfig);
+
+    console.log('✅ Transporter created successfully');
+
+    // Verify the transporter
     transporter.verify((error, success) => {
       if (error) {
-        console.error('❌ Email transporter verification failed:', error.message);
+        console.error('❌ Email transporter verification failed:');
+        console.error('   Error:', error.message);
+        console.error('   Code:', error.code);
+        if (error.command) console.error('   Command:', error.command);
       } else {
-        console.log('✅ Email transporter is ready to send emails');
+        console.log('✅ Email transporter verified and ready to send emails');
       }
     });
 
     return transporter;
+
   } catch (error) {
-    console.error('❌ Error creating transporter:', error);
+    console.error('❌ Error creating transporter:', error.message);
+    console.error('Full error:', error);
     return null;
   }
 };
@@ -54,72 +76,110 @@ const createTransporter = () => {
 // Create the transporter
 const transporter = createTransporter();
 
-// Email sending function
+// Enhanced email sending function
 const sendEmail = async (options) => {
+  console.log('\n📧 === SENDING EMAIL ===');
+  console.log('📝 Options received:', {
+    to: options.to,
+    subject: options.subject,
+    hasHtml: !!options.html,
+    hasText: !!options.text,
+    replyTo: options.replyTo
+  });
+
   if (!transporter) {
-    console.error('❌ Email transporter not configured');
-    throw new Error('Email service is not configured. Please check your environment variables.');
+    const error = new Error('Email transporter not configured. Please check your SMTP settings.');
+    console.error('❌', error.message);
+    throw error;
   }
 
   try {
     const mailOptions = {
-      from: process.env.EMAIL_USER,
+      from: `"${process.env.SMTP_FROM_EMAIL || 'Bagga Bugs'}" <${process.env.SMTP_USER}>`,
       to: options.to,
       subject: options.subject,
-      text: options.text,
-      html: options.html
+      replyTo: options.replyTo || process.env.SMTP_USER
     };
 
+    // Add content
+    if (options.html) {
+      mailOptions.html = options.html;
+    }
+    if (options.text) {
+      mailOptions.text = options.text;
+    }
+
+    console.log('📋 Final mail options:', {
+      from: mailOptions.from,
+      to: mailOptions.to,
+      subject: mailOptions.subject,
+      replyTo: mailOptions.replyTo,
+      hasHtml: !!mailOptions.html,
+      hasText: !!mailOptions.text
+    });
+
+    console.log('📤 Attempting to send email...');
     const info = await transporter.sendMail(mailOptions);
-    console.log('✅ Email sent:', info.messageId);
+    
+    console.log('✅ Email sent successfully!');
+    console.log('📨 Message ID:', info.messageId);
+    console.log('📬 Response:', info.response);
+
     return info;
+
   } catch (error) {
-    console.error('❌ Error sending email:', error);
+    console.error('\n❌ === EMAIL SENDING ERROR ===');
+    console.error('Error type:', error.constructor.name);
+    console.error('Error message:', error.message);
+    console.error('Error code:', error.code);
+    console.error('Error command:', error.command);
+    if (error.response) {
+      console.error('SMTP Response:', error.response);
+    }
+    console.error('================================\n');
     throw error;
+  }
+};
+
+// Test function
+const testEmailConnection = async () => {
+  try {
+    if (!transporter) {
+      throw new Error('Transporter not available');
+    }
+    await transporter.verify();
+    console.log('🧪 Email connection test: ✅ PASSED');
+    return true;
+  } catch (error) {
+    console.error('🧪 Email connection test: ❌ FAILED');
+    console.error('   Error:', error.message);
+    return false;
   }
 };
 
 // Email templates
 const emailTemplates = {
   welcome: (userData) => ({
-    subject: 'Welcome to Our Studio!',
+    subject: 'Welcome to Bagga Bugs!',
     html: `
       <h1>Welcome ${userData.name}!</h1>
-      <p>Thank you for joining our studio platform.</p>
+      <p>Thank you for joining our email campaign platform.</p>
       <p>We're excited to have you on board!</p>
     `
   }),
   
-  resetPassword: (userData, resetToken) => ({
-    subject: 'Password Reset Request',
-    html: `
-      <h1>Password Reset</h1>
-      <p>Hi ${userData.name},</p>
-      <p>You requested to reset your password.</p>
-      <p>Click the link below to reset your password:</p>
-      <a href="${process.env.FRONTEND_URL}/reset-password?token=${resetToken}">Reset Password</a>
-      <p>This link will expire in 1 hour.</p>
-      <p>If you didn't request this, please ignore this email.</p>
-    `
-  }),
-  
-  bookingConfirmation: (bookingData) => ({
-    subject: 'Booking Confirmation',
-    html: `
-      <h1>Booking Confirmed!</h1>
-      <p>Your booking has been confirmed for:</p>
-      <ul>
-        <li>Date: ${bookingData.date}</li>
-        <li>Time: ${bookingData.time}</li>
-        <li>Service: ${bookingData.service}</li>
-      </ul>
-      <p>Thank you for choosing our studio!</p>
-    `
+  campaign: (userData, content) => ({
+    subject: content.subject,
+    html: content.body
   })
 };
+
+console.log(`📊 Email service status: ${transporter ? '✅ READY' : '❌ NOT READY'}`);
+console.log('='.repeat(40) + '\n');
 
 module.exports = {
   transporter,
   sendEmail,
-  emailTemplates
+  emailTemplates,
+  testEmailConnection
 };
