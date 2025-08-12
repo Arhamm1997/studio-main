@@ -1,65 +1,125 @@
-// config/emailConfig.js - FIXED VERSION
-require('dotenv').config();
+// backend/config/emailConfig.js
 const nodemailer = require('nodemailer');
+require('dotenv').config();
 
-// Debug: Check if nodemailer is loaded properly
-console.log('📦 Nodemailer loaded:', typeof nodemailer.createTransporter);
+// Debug logging
+console.log('📦 Nodemailer loaded:', typeof nodemailer);
+console.log('📧 Email config:', {
+  user: process.env.EMAIL_USER ? '✓ Set' : '✗ Not set',
+  pass: process.env.EMAIL_PASS ? '✓ Set' : '✗ Not set',
+  service: process.env.EMAIL_SERVICE || 'gmail'
+});
 
-// Email transporter configuration
 const createTransporter = () => {
   try {
-    // Check if using SendGrid
-    if (process.env.SENDGRID_API_KEY) {
-      return nodemailer.createTransporter({
-        service: 'SendGrid',
-        auth: {
-          user: 'apikey',
-          pass: process.env.SENDGRID_API_KEY
-        }
-      });
+    // Check if nodemailer is properly loaded
+    if (!nodemailer || typeof nodemailer.createTransporter !== 'function') {
+      throw new Error('Nodemailer not properly loaded');
     }
 
-    // Default SMTP configuration for Gmail
+    // Check if email credentials are set
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      console.warn('⚠️ Email credentials not set in environment variables');
+      console.log('Please set EMAIL_USER and EMAIL_PASS in your .env file');
+      return null;
+    }
+
     const transporter = nodemailer.createTransporter({
-      service: 'gmail',
-      host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-      port: parseInt(process.env.EMAIL_PORT) || 587,
-      secure: process.env.EMAIL_SECURE === 'true',
+      service: process.env.EMAIL_SERVICE || 'gmail',
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
       },
       tls: {
-        rejectUnauthorized: false // For development only
+        rejectUnauthorized: false // Only for development
+      }
+    });
+
+    // Verify the transporter configuration
+    transporter.verify((error, success) => {
+      if (error) {
+        console.error('❌ Email transporter verification failed:', error.message);
+      } else {
+        console.log('✅ Email transporter is ready to send emails');
       }
     });
 
     return transporter;
-
   } catch (error) {
     console.error('❌ Error creating transporter:', error);
     return null;
   }
 };
 
-// Create transporter
+// Create the transporter
 const transporter = createTransporter();
 
-// Verify connection configuration
-if (transporter) {
-  transporter.verify(function(error, success) {
-    if (error) {
-      console.error('❌ Email configuration error:', error.message);
-      console.log('📌 Check your .env file for correct email settings');
-      console.log('   EMAIL_USER:', process.env.EMAIL_USER ? '✓ Set' : '✗ Not set');
-      console.log('   EMAIL_PASS:', process.env.EMAIL_PASS ? '✓ Set' : '✗ Not set');
-    } else {
-      console.log('✅ Email server is ready to send messages');
-      console.log('📧 Using email:', process.env.EMAIL_USER);
-    }
-  });
-} else {
-  console.error('❌ Failed to create email transporter');
-}
+// Email sending function
+const sendEmail = async (options) => {
+  if (!transporter) {
+    console.error('❌ Email transporter not configured');
+    throw new Error('Email service is not configured. Please check your environment variables.');
+  }
 
-module.exports = transporter;
+  try {
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: options.to,
+      subject: options.subject,
+      text: options.text,
+      html: options.html
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('✅ Email sent:', info.messageId);
+    return info;
+  } catch (error) {
+    console.error('❌ Error sending email:', error);
+    throw error;
+  }
+};
+
+// Email templates
+const emailTemplates = {
+  welcome: (userData) => ({
+    subject: 'Welcome to Our Studio!',
+    html: `
+      <h1>Welcome ${userData.name}!</h1>
+      <p>Thank you for joining our studio platform.</p>
+      <p>We're excited to have you on board!</p>
+    `
+  }),
+  
+  resetPassword: (userData, resetToken) => ({
+    subject: 'Password Reset Request',
+    html: `
+      <h1>Password Reset</h1>
+      <p>Hi ${userData.name},</p>
+      <p>You requested to reset your password.</p>
+      <p>Click the link below to reset your password:</p>
+      <a href="${process.env.FRONTEND_URL}/reset-password?token=${resetToken}">Reset Password</a>
+      <p>This link will expire in 1 hour.</p>
+      <p>If you didn't request this, please ignore this email.</p>
+    `
+  }),
+  
+  bookingConfirmation: (bookingData) => ({
+    subject: 'Booking Confirmation',
+    html: `
+      <h1>Booking Confirmed!</h1>
+      <p>Your booking has been confirmed for:</p>
+      <ul>
+        <li>Date: ${bookingData.date}</li>
+        <li>Time: ${bookingData.time}</li>
+        <li>Service: ${bookingData.service}</li>
+      </ul>
+      <p>Thank you for choosing our studio!</p>
+    `
+  })
+};
+
+module.exports = {
+  transporter,
+  sendEmail,
+  emailTemplates
+};
